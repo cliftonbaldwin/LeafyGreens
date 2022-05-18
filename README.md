@@ -1,2 +1,2 @@
 # LeafyGreens
-R code and daat for Leafy Green models
+R code and data for Leafy Green models
