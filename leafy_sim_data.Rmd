@@ -1,0 +1,690 @@
+---
+title: "Leafy Green Models"
+author: "Dr. Clifton Baldwin"
+date: "May 2, 2022"
+output: html_notebook
+---
+
+# Simulate Leafy Green Refridgeration Data
+
+This notebook works with the data from Vehdahl's dissertation 
+"CROSS-CONTAMINATION, MODELING, AND RISK ASSESSMENT FOR PATHOGENS ON FRESH- CUT PRODUCE" By Ann Charles Vegdahl, under the direction of Dr. Donald W. Schaffner, October 2017.
+
+```{r include=FALSE}
+# Load the tidyverse to get readr, dplyr, ggplot2, and magittr
+library(tidyverse)
+# Load rstatix for statistical tests
+library(rstatix)
+
+# Note: library(knitr) is optional. Uncomment the lines that use knitr to present formatted results
+
+options(tinytex.verbose = TRUE)
+```
+
+Brown et al. (2016) discuss truck trailer temperatures during transport of fresh-cut leafy greens. Although we used the actual data kindly provided by Brown et. al. for our research, it is not our data to share. Therefore, I will use statistics reported in the published paper to simulate "temperature" data in this notebook. 
+
+**Brown, W., Ryser, E., Gorman, L., Steinmaus, S., Vorst, K., 2016. *Transit temperatures experienced by fresh-cut leafy greens during cross-country shipment*. Food Control 61, 146–155. https://doi.org/10.1016/j.foodcont.2015.09.014**
+
+
+Brown et al. 2016 states, "the Temptale 4® sensors recorded temperatures every 5 min. 
+
+"High temperature abuse above 5C occurred in 16 of 16 shipments but was minimal in most cases (0.1-6.7% of the duration of each run) and only occurred extensively in 18.75% or 3 of the shipments."
+
+"Twenty-four or thirty temperature loggers were placed on six pallets and along the sidewalls during the loading of each trailer."
+
+Looking at the tables in the paper, it appears the data is slightly skewed right. Although I suspect I could model the data roughly using a Normal distribution, will assume the temperature data adheres to a Weibull distribution for each truck. Although the Weibull distribution are only non-negative values, the actual temperature rarely went below 0. Furthermore we are modeling the impact of higher temperatures and not freezing. Therefore the Weibull distribution is sufficient for our purposes. One could shift the data left, if future studies look at the sub-zero temperatures.  
+
+There were 16 trucks. Brown et. al. (2016), "Twenty-four or thirty temperature loggers were placed on six pallets and along the sidewalls during the loading of each trailer."
+
+## Weibull Distribution
+
+```{r}
+# From Table 6 in Brown et al. 2016,
+# temps = c(2.30, 2.23, 2.78, 1.91, 2.46, 2.41, 1.08, 1.58, 0.79, 
+#           2.19, 2.68, 2.92)
+
+# From Table 2, I can make some very rough estimates of the statistics and use that information to simulate some data. Five truck routes had temps > 5C less than 1% of the time. Rarely did truck have a negative temperature. I will estimate using a Weibull distribution, despite that Weibull cannot be <0.
+
+# Set a seed so that the data is reproducable
+set.seed(123)
+# Define a range of values for the shape and scale parameters of the Weibull
+shape = round(runif(16, min=1.5, max = 6),digits = 4)
+scale = round(runif(16, min=1.7, max=3.4),digits = 4)
+
+# Duration of Trips from Table 5
+hours <- c(31.17, 77.25, 76.58, 83.92, 47.92, 69.0, 60.92, 49.83)
+# There were 16 trucks but only 8 times listed. So I double the vector
+hours <- c(hours, hours)
+# For each "probe"
+n <- round(12.0*hours) # every 5 minutes is 12 per hour
+
+# Since all probe readings are combined anyway, 
+#  just multiply n by the number of probes.
+# I do not know how many have 24 and how many 30 probes.
+# Randomly assign 50%-50%
+# probes <- if_else(runif(16, 0, 1) < 0.5, 24, 30)
+# n <- n * probes 
+# Adding these additional observations for every probe does not alter results.
+# Therefore I am using just a set of observations "per truck"
+
+# Generate 16 Weibull distributions
+trucks <- list(n, shape, scale) %>% 
+  pmap(rweibull)
+
+# Identify each of the 16 trucks
+names(trucks) <- paste(1:16, "_", sep="")
+
+rm(hours, n, shape, scale)
+
+```
+
+trucks is now a list of 16 arrays, with each array being the set of temperature values for that truck.
+
+```{r}
+# Clean up the simulated data
+transit <- trucks %>% 
+  unlist() %>% as.data.frame() %>%
+  rename(temp_c = ".") %>% 
+  rownames_to_column("truck_name") %>% 
+  separate(truck_name, c("truck_number", "minutes")) %>% 
+  mutate(truck_number = as.numeric(truck_number),
+         minutes = strtoi(minutes) * 5,
+         temp_c = round(temp_c, digits = 4)) %>% 
+  # Since all probe readings are combined anyway, do not bother specifying which probe
+  bind_cols(probe_number = 1)
+
+rm(trucks)
+```
+
+Anyone who wants to use their own data, read that data into the data.frame `transit`. Alternately one can modify the simulation to run this code with "different" temperature values. 
+
+transit has four numeric variables:
+
+- truck_number - a numeric identifier for the different trucks (or locations)
+- minutes - the elapsed minutes
+- temp_c - the temperature in Celsius
+- probe_number - optionally if the truck/location had multiple probes. Defaults to 1 when no different probes
+
+
+```{r}
+transit %>% str(.)
+```
+
+## Explore Temperature Statistics by Truck
+
+```{r echo=FALSE}
+
+transit %>%
+  group_by(truck_number) %>% 
+  summarise(Minimum = round(min(temp_c, na.rm = TRUE),2),
+         Maximum = round(max(temp_c, na.rm = TRUE),2),
+         Mean = round(mean(temp_c, na.rm = TRUE),2),
+         Standard_Deviation = round(sd(temp_c, na.rm = TRUE),2),
+         Median = round(median(temp_c, na.rm = TRUE),2),
+         Minutes = max(minutes, na.rm = TRUE),
+         Observations = format(n(), big.mark = ",")) %>%
+  select(truck_number, Minimum, Maximum, Mean,
+         Standard_Deviation, Median, Minutes, Observations) %>% 
+  rename(Truck_Number = truck_number)
+
+```
+
+
+```{r}
+transit %>% 
+  ggplot(aes(x = temp_c)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Simulated Temperature Data for 16 Trucks",
+       x = "Temperature in Celsius") +
+  facet_wrap(~truck_number)
+```
+
+
+# Models
+
+**One should not have to modify any of the code below**
+
+Read in the different model parameters from Table 3 (corrected) of Vegdahl's dissertation
+
+```{r}
+
+metrics <- read_csv("table3.csv", show_col_types = FALSE) %>% 
+  # standardize the metrics a bit (the remaining are standardized in logCFU())
+  # hourly or daily
+  mutate(b = if_else(grepl('h', Units, fixed = TRUE), b, b / sqrt(24.0))) %>%
+         # square root or not 
+  mutate(b = if_else(grepl('√', Units, fixed = TRUE), b, sqrt(b)),
+         logarithm = if_else(grepl('Ln', Units, fixed = TRUE), FALSE, TRUE),
+         Source = str_remove_all(Source, "[()]"),
+         Organism = paste(Organism, Source, sep = "\n"))
+
+```
+
+
+## Pseudo code
+
+For each probe in each truck, compute the growth based on the current temperature and the given model. $$\mu = (b(T-T_0))^2$$
+
+Compute the difference of current temperature T and minimum temperature (T~0~), call it Tdiff. If the Tdiff is negative, set it to 0.
+
+If the model call is standard $$\sqrt{log_{10}(CFU/hr/C)}$$, then compute growth as ((((T - T~0~) * b)^2^) * (5.0 / 60)).
+
+If the model call is $$\sqrt{log_{10} (CFU/day/C)}$$, by day instead of by hour, then compute growth as ((((T - T~0~) * b)^2^) * (5.0 / 1440)), where 1440 = 60 * 24 or minutes in a day.
+
+If the model call is log~10~(CFU/hr/C), then compute growth as ((((T - T~0~)^2^ * b)) * (5.0 / 60)).
+
+If the model call is $$\sqrt{\ln(CFU/hr/C)}$$, then compute growth as $$\log_{10}(\exp^{((((T - T_0) * b)^2) * (5.0 / 60))})$$.
+
+
+```{r}
+# Compute the growth in log(CFU/time)
+logCFU <- function(x){
+  organism = x[1]
+  b = as.numeric(x[2])
+  T0 = as.numeric(x[3])
+  source = x[4]
+  logarithm = as.logical(x[5]) # Indicator for common or natural logarithm
+
+  # Convert any natural logariths (i.e. ln) to common logs (i.e. base 10)
+  b1 = if_else(logarithm, b, b/sqrt(log(10)))
+  
+  growth <- transit %>%
+    select(truck_number, probe_number, minutes, temp_c) %>%
+    group_by(truck_number, probe_number) %>%
+    # If the temperature is below T0, set the difference to zero
+    mutate(TdiffT0 = if_else(temp_c < T0, 0, temp_c - T0)) %>%
+    mutate(Organism = organism, # The organism
+           Source = source,     # The source reference and organism
+           # Compute the Ratkowsky et al. equation
+           growth = ((TdiffT0^2L) * (b1^2L)) * (5.0 / 60.0)
+           )
+  return(growth %>%
+    group_by(Organism, Source, truck_number, probe_number) %>%
+    # Return the total growth per probe_number
+    summarise(growth = sum(growth), 
+              .groups = "keep") %>% 
+    add_column(b = b1, T0 = T0))
+}
+
+```
+
+
+## Compute the growth given the data, models, and parameters
+
+```{r echo=FALSE}
+
+growth <- apply(metrics[,c(1,3,4,7,8)], 1, logCFU)
+# Result is a list
+
+# Convert the list by combining each element into a Tibble 
+#   and add an id number 
+growth <- bind_rows(growth, .id = "metric_number")
+
+```
+
+### All calculations complete
+
+## Summary Graph
+
+```{r echo=FALSE}
+# jpeg("Models.jpg")
+growth %>%
+  mutate(Organism = if_else(str_starts(Organism, "S"), "Salmonella", Organism),
+         Organism = if_else(str_starts(Organism, "E"), "E. coli", Organism),
+         Organism = if_else(str_starts(Organism, "L"), "Listeria", Organism)) %>%
+  ggplot(aes(x=fct_reorder(Source, growth, mean),
+             y=growth, fill = Source)) +
+  geom_boxplot() +
+  labs(title = "Summary of Models",
+       x = "",
+       y = "Logarithmic Growth") +
+  theme(legend.position="none",
+        axis.text.x = element_text(angle = 65, vjust = 0.5, hjust=0.5)) +
+  facet_wrap(~fct_relevel(Organism, "Salmonella", "E. coli"), scales = "free")
+# dev.off()
+
+```
+
+
+## Salmonella
+
+```{r echo=FALSE}
+# Salmonella
+# jpeg("Salmonella.jpg")
+growth %>%
+  filter(str_starts(Organism, "S")) %>% 
+  ggplot(aes(x=factor(truck_number),
+             y=growth, fill = truck_number)) +
+  geom_boxplot() +
+  labs(title = "Salmonella spp.",
+       subtitle = "by Model by Truck",
+       x = "Truck Numbers",
+       y = "Logarithmic Growth") +
+  scale_fill_gradient2(low = "blue", mid = "yellow", high = "red",
+                         midpoint = 8) +
+  theme(legend.position="none") +
+  facet_wrap(~ reorder(Source, growth, mean , na.rm=TRUE))
+
+# dev.off()
+
+
+```
+
+
+```{r echo=FALSE}
+# Salmonella
+# jpeg("SalmonellaModels.jpg")
+
+growth %>%
+  filter(str_starts(Organism, "S")) %>% 
+  ggplot(aes(x=reorder(Source, growth, mean , na.rm=TRUE), 
+             y=growth, fill = Source)) +
+  geom_boxplot() +
+  labs(title = "Salmonella spp.",
+       subtitle = "by Model",
+       x = "",
+       y = "Logarithmic Growth") +
+  theme(legend.position="none",
+        axis.text.x = element_text(angle = 65, vjust = 0.5, hjust=0.5))
+# dev.off()
+
+
+```
+
+### Salmonella spp. Model Parameters and Statistics
+
+Maximum is the truck with the most growth
+
+```{r echo=FALSE}
+growth %>% 
+  filter(str_starts(Organism, "S")) %>% 
+  mutate(Model = factor(Source),
+         realgrowth = 10^growth) %>% 
+  group_by(Model) %>% # by model, truck, probe
+  summarise(growth = mean(realgrowth, na.rm = TRUE),
+            maxgrowth = max(realgrowth, na.rm = TRUE),
+            b = max(b, na.rm = TRUE),
+            T0 = max(T0, na.rm = TRUE),
+            .groups = "keep") %>% # by model, truck
+  mutate(Mean_growth = log10(growth),
+         Maximum_growth = log10(maxgrowth)) %>%
+  select(Model, b, T0, Mean_growth, Maximum_growth) %>% 
+  arrange(Mean_growth)
+  # knitr::kable(format = "pipe")
+  
+```
+
+
+## Normality Test
+
+In order to determine what statistical tests are appropriate, we need to understand our data.
+
+The assumptions for the One-Way Repeated Measures ANOVA include:
+
+    Continuous
+    Normally Distributed
+    Random Sample
+    Enough Data
+    Sphericity
+
+Most of the assumptions for between-subjects ANOVA design apply, however the key variation is that instead of the homogeneity of variance assumption, repeated-measures designs have the assumption of Sphericity, which means that the variance of the population difference scores for any two conditions should be the same as the variance of the population difference scores for any other two conditions.
+
+Test of ANOVA assumptions:
+  the data are normally distributed and the variance across groups are homogeneous
+  http://www.sthda.com/english/wiki/one-way-anova-test-in-r
+
+
+```{r echo=FALSE}
+
+res <-
+growth %>%
+  filter(str_starts(Organism, "S")) %>% 
+  mutate(Organism = factor(Organism)) %>% 
+  aov(growth ~ Organism, data = .)
+
+plot(res,1)
+
+plot(res,2)
+       
+# Extract the residuals
+aov_residuals <- residuals(object = res)
+# Run Shapiro-Wilk test
+shapiro.test(x = aov_residuals )
+
+rm(res,aov_residuals)
+```
+
+Reject the null hypothesis that the data is Normal. Therefore a non parametric approach will be used.
+
+## Friedman Test
+### non parametric, repeated measures, one-way Analysis of Variance
+
+```{r echo=FALSE}
+# Friedman Test - non parametric, repeated measures, one-way Analysis of variance
+growth %>% 
+  filter(str_starts(Organism, "S")) %>% 
+  group_by(Source) %>% 
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_test(growth ~ Source | probe)
+
+```
+
+From the output of the Friedman test, we know that there is a significant difference between groups, but we do not know which pairs of groups are different.
+If the Friedman test is significant, post hoc tests to locate which pairs are different are needed. A significant Friedman test can be followed up by pairwise Wilcoxon signed-rank tests for identifying which groups are different.
+
+The Wilcoxon signed-rank test is a non-parametric statistical hypothesis test used either to test the location of a set of samples or to compare the locations of two populations using a set of matched samples.
+The Bonferroni correction is a conservative adjustment where the p-values are multiplied by the number of comparisons. 
+
+```{r echo=FALSE}
+growth %>%
+  filter(str_starts(Organism, "S")) %>% 
+  ungroup() %>% 
+  wilcox_test(growth ~ Source, paired = TRUE, p.adjust.method = "bonferroni") %>% 
+  select(group1, group2, p.adj, p.adj.signif)
+
+```
+
+
+```{r echo=FALSE}
+
+growth %>% 
+  filter(str_starts(Organism, "S")) %>% 
+  group_by(Source) %>% 
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_effsize(growth ~ Source | probe)
+
+```
+
+The Kendall’s W coefficient assumes the value from 0 (indicating no relationship) to 1 (indicating a perfect relationship). So the effect is quite large between models with Kendall W = 0.94.
+
+
+## E. coli
+
+```{r echo=FALSE}
+# jpeg("E_coli.jpg")
+growth %>%
+  filter(str_starts(Organism, "E")) %>% 
+  mutate(realgrowth = 10^growth) %>% 
+  ggplot(aes(x=factor(truck_number), y=growth, fill = truck_number)) +
+  geom_boxplot() +
+  labs(title = "E. coli 0157:H7",
+       subtitle = "by Model by Truck",
+       x = "Truck Numbers",
+       y = "Logarithmic Growth") +
+  scale_fill_gradient2(low = "blue", mid = "yellow", high = "red",
+                         midpoint = 8) +
+  theme(legend.position="none") +
+  facet_wrap(~ reorder(Source, realgrowth, mean , na.rm=TRUE))
+
+# dev.off()
+
+```
+
+```{r echo=FALSE}
+# jpeg("EcoliModel.jpg")
+
+growth %>%
+  filter(str_starts(Organism, "E")) %>% 
+  mutate(realgrowth = 10^growth) %>% 
+  ggplot(aes(x=reorder(Source, realgrowth, mean , na.rm=TRUE), 
+             y=growth, fill = Source)) +
+  geom_boxplot() +
+  labs(title = "E. coli 0157:H7",
+       subtitle = "by Model",
+       x = "",
+       y = "Logarithmic Growth") +
+  theme(legend.position="none",
+        axis.text.x = element_text(angle = 65, vjust = 0.5, hjust=0.5))
+# dev.off()
+
+
+```
+
+### E. coli 0157:H7 Model Parameters and Statistics
+
+```{r echo=FALSE}
+growth %>%
+  filter(str_starts(Organism, "E")) %>% 
+  mutate(Model = factor(Source),
+         truck_number= factor(truck_number),
+         realgrowth = 10^growth) %>% 
+  group_by(Model) %>% # by model, truck, probe
+  summarise(growth = mean(realgrowth, na.rm = TRUE),
+            maxgrowth = max(realgrowth, na.rm = TRUE),
+            b = max(b, na.rm = TRUE),
+            T0 = max(T0, na.rm = TRUE),            
+            .groups = "keep") %>%  # by model, truck
+  mutate(Mean_growth = log10(growth),
+         Maximum_growth = log10(maxgrowth)) %>%
+  select(Model, b, T0, Mean_growth, Maximum_growth) %>% 
+  arrange(Mean_growth)
+  # knitr::kable(format = "pipe")
+```
+
+### Normality Test
+
+Test of ANOVA assumptions:
+  the data are normally distributed and the variance across groups are homogeneous
+  http://www.sthda.com/english/wiki/one-way-anova-test-in-r
+
+
+```{r echo=FALSE}
+
+res <- growth %>%
+  filter(str_starts(Organism, "E")) %>% 
+  aov(growth ~ Source, data = .)
+
+plot(res,1)
+
+plot(res,2)
+       
+# Extract the residuals
+aov_residuals <- residuals(object = res)
+# Run Shapiro-Wilk test
+shapiro.test(x = aov_residuals )
+
+rm(res,aov_residuals)
+```
+
+Models appear to have heterogeneous variance, and
+Reject the null hypothesis that the data is Normal. Therefore a non parametric approach will be used.
+
+## Friedman Test 
+### non parametric, repeated measures, one-way Analysis of Variance
+
+
+```{r echo=FALSE}
+# Friedman Test - non parametric, repeated measures, one-way Analysis of variance
+
+growth %>% 
+  filter(str_starts(Organism, "E")) %>% 
+  group_by(Source) %>% 
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_test(growth ~ Source | probe)
+
+```
+
+From the output of the Friedman test, we know that there is a significant difference between groups, but we do not know which pairs of groups are different.
+
+A significant Friedman test can be followed up by pairwise Wilcoxon signed-rank tests for identifying which groups are different. The Wilcoxon signed-rank test is a non-parametric statistical hypothesis test used either to test the location of a set of samples or to compare the locations of two populations using a set of matched samples.
+
+```{r echo=FALSE}
+growth %>%
+  filter(str_starts(Organism, "E")) %>% 
+  ungroup() %>% 
+  wilcox_test(growth ~ Source, paired = TRUE, p.adjust.method = "bonferroni") %>% 
+  select(group1, group2, p.adj, p.adj.signif)
+  # knitr::kable(format = "pipe")
+```
+
+
+
+```{r echo=FALSE}
+
+growth %>% 
+  filter(str_starts(Organism, "E")) %>%
+  group_by(Source) %>% #summarise(n = n())
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_effsize(growth ~ Source | probe)
+
+```
+
+The Kendall’s W coefficient assumes the value from 0 (indicating no relationship) to 1 (indicating a perfect relationship). So the effect is quite large between models with Kendall W = 0.94.
+
+
+
+## Listeria monocytogenes
+
+```{r echo=FALSE}
+# jpeg("Listeria.jpg")
+growth %>%
+  filter(str_starts(Organism, "L")) %>% 
+  ggplot(aes(x=factor(truck_number), y=growth, fill = truck_number)) +
+  geom_boxplot() +
+  labs(title = "Listeria monocytogenes",
+       subtitle = "by Model by Truck",
+       x = "Truck Numbers",
+       y = "Logarithmic Growth") +
+  scale_fill_gradient2(low = "blue", mid = "yellow", high = "red",
+                         midpoint = 8) +
+  theme(legend.position="none") +
+  facet_wrap(~ reorder(Source, growth, mean , na.rm=TRUE))
+
+# dev.off()
+
+
+```
+
+```{r echo=FALSE}
+# jpeg("ListeriaModel.jpg")
+
+growth %>%
+  filter(str_starts(Organism, "L")) %>% 
+  ggplot(aes(x=reorder(Source, growth, mean , na.rm=TRUE), 
+             y=growth, fill = Source)) +
+  geom_boxplot() +
+  labs(title = "L. monocytogenes",
+       subtitle = "by Model",
+       x = "",
+       y = "Logarithmic Growth") +
+  theme(legend.position="none",
+        axis.text.x = element_text(angle = 65, vjust = 0.5, hjust=0.5))
+# dev.off()
+
+
+```
+
+### Listeria monocytogenes Model Parameters and Statistics
+
+```{r echo=FALSE}
+growth %>%
+  filter(str_starts(Organism, "L")) %>% 
+  mutate(Model = factor(Source),
+         realgrowth = 10^growth) %>% 
+  group_by(Model) %>% # by model, truck, probe
+  summarise(growth = mean(realgrowth, na.rm = TRUE),
+            maxgrowth = max(realgrowth, na.rm = TRUE),
+            b = max(b, na.rm = TRUE),
+            T0 = max(T0, na.rm = TRUE),
+            .groups = "keep") %>%  # by model, truck
+  mutate(Mean_growth = log10(growth),
+         Maximum_growth = log10(maxgrowth)) %>%
+  select(Model, b, T0, Mean_growth, Maximum_growth) %>% 
+  arrange(Mean_growth)
+  # knitr::kable(format = "pipe")
+```
+
+
+### Normality Test
+
+Test of ANOVA assumptions:
+  the data are normally distributed and the variance across groups are homogeneous
+  http://www.sthda.com/english/wiki/one-way-anova-test-in-r
+
+
+```{r echo=FALSE}
+
+res <- growth %>%
+  filter(str_starts(Organism, "L")) %>% 
+  aov(growth ~ Source, data = .)
+
+plot(res,1)
+
+plot(res,2)
+       
+# Extract the residuals
+aov_residuals <- residuals(object = res)
+# Run Shapiro-Wilk test
+shapiro.test(x = aov_residuals )
+
+rm(res,aov_residuals)
+```
+
+Models appear to have heterogeneous variance and not follow a Normal distribution.
+Reject the null hypothesis that the data is Normal. Therefore a non parametric approach will be used.
+
+## Friedman Test 
+### non parametric, repeated measures, one-way Analysis of Variance
+
+
+```{r echo=FALSE}
+# Friedman Test - non parametric, repeated measures, one-way Analysis of variance
+
+growth %>% 
+  filter(str_starts(Organism, "L")) %>% 
+  group_by(Source) %>% 
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_test(growth ~ Source | probe)
+
+```
+
+From the output of the Friedman test, we know that there is a significant difference between groups, but we do not know which pairs of groups are different.
+
+A significant Friedman test can be followed up by pairwise Wilcoxon signed-rank tests for identifying which groups are different. The Wilcoxon signed-rank test is a non-parametric statistical hypothesis test used either to test the location of a set of samples or to compare the locations of two populations using a set of matched samples.
+
+```{r echo=FALSE}
+growth %>%
+  filter(str_starts(Organism, "L")) %>% 
+  ungroup() %>% 
+  wilcox_test(growth ~ Source, paired = TRUE, p.adjust.method = "bonferroni") %>% 
+  select(group1, group2, p.adj, p.adj.signif)
+  # knitr::kable(format = "pipe")
+```
+
+
+
+```{r echo=FALSE}
+
+growth %>% 
+  filter(str_starts(Organism, "L")) %>% 
+  group_by(Source) %>% 
+  mutate(probe = paste(truck_number, "_", probe_number, sep = "")) %>% 
+  ungroup() %>% 
+  friedman_effsize(growth ~ Source | probe)
+
+```
+
+The Kendall’s W coefficient assumes the value from 0 (indicating no relationship) to 1 (indicating a perfect relationship). The Kendall W of 1 indicates the best relationship between models of the three bacteria. That means the Koseki and Isobe model was the most conservative for all given temperatures, and Mishra et al. showed the least growth for all given temperatures.
+
+
+# References
+
+The table of parameters (referenced as Table 3 (corrected) from Vegdahl's dissertation), which was read and used in the computations above.
+
+```{r echo=FALSE}
+metrics <- read_csv("table3.csv", show_col_types = FALSE) %>% 
+  mutate(b = formatC(b),
+         T0 = formatC(T0))
+
+metrics %>%
+  select(Organism, b, Units, T0, Source) %>% #Substrate
+  mutate(Source = str_remove_all(Source, "[()]")) %>% 
+  knitr::kable(., caption = "Models", align = "l") %>% #, digits = 2
+  kableExtra::column_spec(1, italic = TRUE) %>% 
+  kableExtra::kable_styling()
+```
