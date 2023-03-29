@@ -1,14 +1,14 @@
 ---
 title: "Leafy Green Models"
-author: "Dr. Clifton Baldwin"
-date: "May 2, 2022"
+author:
+  - Dr. Clifton Baldwin^[Stockton University, Clifton.Baldwin@stockton.edu]
+  - Dr. Don Schaffner^[Rutgers University, don.schaffner@rutgers.edu]
+
+date: "March 29, 2023"
 output: html_notebook
 ---
 
-# Simulate Leafy Green Refridgeration Data
-
-This notebook works with the data from Vehdahl's dissertation 
-"CROSS-CONTAMINATION, MODELING, AND RISK ASSESSMENT FOR PATHOGENS ON FRESH- CUT PRODUCE" By Ann Charles Vegdahl, under the direction of Dr. Donald W. Schaffner, October 2017.
+# Leafy Greens Models
 
 ```{r include=FALSE}
 # Load the tidyverse to get readr, dplyr, ggplot2, and magittr
@@ -20,6 +20,21 @@ library(rstatix)
 
 options(tinytex.verbose = TRUE)
 ```
+
+## R Version `r R.version.string` in RStudio `r rstudioapi::versionInfo()$long_version`
+
+```{r echo=FALSE}
+print(paste("TidyVerse package version", packageVersion("tidyverse"), sep = " "))
+
+print(paste("rstatix statistical package version", packageVersion("rstatix"), sep = " "))
+```
+
+## Simulate Leafy Green Refridgeration Data
+
+This notebook works with the data from Vehdahl's dissertation: 
+
+### "CROSS-CONTAMINATION, MODELING, AND RISK ASSESSMENT FOR PATHOGENS ON FRESH- CUT PRODUCE" By Ann Charles Vegdahl, under the direction of Dr. Donald W. Schaffner, October 2017.
+
 
 Brown et al. (2016) discuss truck trailer temperatures during transport of fresh-cut leafy greens. Although we used the actual data kindly provided by Brown et. al. for our research, it is not our data to share. Therefore, I will use statistics reported in the published paper to simulate "temperature" data in this notebook. 
 
